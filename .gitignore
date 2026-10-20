@@ -1,0 +1,28 @@
+# Build output
+*.exe
+*.pdb
+*.zip
+bin/
+obj/
+.vs/
+
+# Local hardware state, backups and session logs
+data/
+**/data/
+*.log
+probe.json
+hardware-probe.json
+command-error.txt
+self-test.txt
+*-before-*.json
+*-after-*.json
+
+# Development renders
+*.layout.txt
+preview*.png
+
+# Editor / OS state
+.DS_Store
+Thumbs.db
+*.user
+*.suo
