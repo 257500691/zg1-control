@@ -4,7 +4,7 @@
 
 把整体音量、五段 EQ 和动态处理放在同一个界面里：先读设备，编辑后应用，再按需保存到耳机。
 
-[![Version](https://img.shields.io/badge/version-1.0.0-138471)](https://github.com/257500691/zg1-control/releases/latest)
+[![Version](https://img.shields.io/badge/version-1.1.0-138471)](https://github.com/257500691/zg1-control/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4)
 ![Device](https://img.shields.io/badge/device-ZG1%20Ultra-243C40)
 ![License](https://img.shields.io/badge/license-BSD--3--Clause-6B7280)
@@ -29,7 +29,7 @@
 
 ### 1. 下载并打开
 
-从 **[Releases](https://github.com/257500691/zg1-control/releases/latest)** 下载 `ZG1-Control-Windows-v1.0.zip`，完整解压到一个可以写入文件的位置，然后双击 `ZG1-Control.exe`。
+从 **[Releases](https://github.com/257500691/zg1-control/releases/latest)** 下载 `ZG1-Control-Windows-v1.1.zip`，完整解压到一个可以写入文件的位置，然后双击 `ZG1-Control.exe`。
 
 - 无需安装 Python 或第三方库。
 - 使用 Windows 自带的 .NET Framework、HID 和 USB 音频驱动。
@@ -89,7 +89,7 @@ flowchart LR
 | 播放 EQ | 五段频率、增益、Q、滤波类型，EQ 开关，曲线预览 |
 | 麦克风 EQ | 麦克风数字和模拟增益，五段 EQ 及开关 |
 | 动态处理 | 噪声门、限幅器及其阈值、时间参数 |
-| 备份与导入 | 导出当前设备配置，导入同型号/固件配置到编辑区 |
+| 备份与还原 | 一键还原增益并保存、保留自定义 EQ；配置导出与导入 |
 | 寄存器与日志 | 已知寄存器的原始值，发送/接收及操作日志 |
 
 ### 播放五段 EQ
@@ -118,9 +118,19 @@ flowchart LR
 
 动态处理会根据信号电平改变行为，不等同于固定的整体音量衰减。只想降低总音量时，保持这些参数原样即可。
 
-### 配置备份与导入
+### 一键还原增益、配置备份与导入
 
-![配置管理：导出、导入和自动备份](docs/images/backup.png)
+![一键还原增益：保留 EQ、自动备份并保存，以及配置导入导出](docs/images/backup.png)
+
+**v1.1 新增：一键还原增益并保存。** 如果希望撤销本工具做的整体衰减，先暂停播放、摘下耳机，连接读取后，进入 **备份与还原**，点击 **一键还原增益并保存** 并确认。
+
+- 将全局数字增益恢复为 **0 dB**：这是开发用耳机在首次调整前实读的值，并非所有设备的出厂预设声明。
+- 自动备份当前参数，只修改 `0x66` 的最低字节，然后提交保存并重新连接读取。无需再按“应用”或“保存”。
+- 保留当前设备的五段自定义 EQ、模拟增益、麦克风、动态处理与保留位。编辑区尚未应用的修改会丢弃。
+- 完成后关闭工具，拔插耳机，再测试官方 App。用户反馈调增益后官方 App 无法识别；原因和还原后是否恢复连接**尚未确认**。
+- 这是撤销数字增益调整，**不是完整出厂重置**。如果还改过其他参数，请导入自己的备份。本项目不会发送未经核实的重置命令。
+
+还原会使原先衰减后的声音变大。重新试听时，从很低的系统音量开始。
 
 - **导出**：保存当前已读取的设备配置，不包含尚未应用的编辑。
 - **导入**：检查格式、型号、固件和控制模式，然后填入编辑区；不会立即写入设备。
@@ -158,7 +168,8 @@ flowchart LR
 | 保留原有五段 EQ 与其他寄存器字节 | 已逐项核对本次改动前后读数 |
 | 配置保存及换接 iPhone | 用户确认换接后衰减仍生效 |
 | Windows EXE 读取全部已知参数 | 已在实机只读读取 36 项寄存器 |
-| 编码、掩码、备份失败和异常停止等逻辑 | **287 项模拟检查通过** |
+| 编码、掩码、备份失败、还原流程和异常停止等逻辑 | **331 项模拟检查通过** |
+| 一键还原增益并保存 | 已通过内存设备测试；未为测试改变真实耳机，官方 App 连接结果待用户确认 |
 | 六个界面页面 | 已在演示模式渲染检查 |
 | 模拟 PGA、麦克风参数、各滤波类型、噪声门、限幅器 | 已实现并完成模拟测试，尚未逐项实机写入/听测 |
 
@@ -205,7 +216,7 @@ Get-Content .\self-test.txt
 $test.ExitCode
 ```
 
-预期结果：`PASS: 287 checks. Simulated device only; no hardware I/O.`
+预期结果：`PASS: 331 checks. Simulated device only; no hardware I/O.`
 
 也可以用 `ZG1-Control.exe --demo` 打开演示界面。开发用命令 `--probe` 会读取真实设备；它不是模拟测试，也不会写入参数。
 

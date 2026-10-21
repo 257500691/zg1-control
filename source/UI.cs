@@ -43,7 +43,7 @@ namespace Zg1Control {
         readonly Dictionary<string,decimal> staged=new Dictionary<string,decimal>();
         readonly List<Panel> pages=new List<Panel>();readonly List<Button> nav=new List<Button>();readonly List<EqGraph> graphs=new List<EqGraph>();
         readonly Panel content=new Panel(),footer=new Panel();readonly TextBox logs=new TextBox();readonly Label status=new Label(),identity=new Label(),pending=new Label(),gainDisplay=new Label();
-        readonly Button connect=new Button(),apply=new Button(),save=new Button();readonly DataGridView raw=new DataGridView();
+        readonly Button connect=new Button(),apply=new Button(),save=new Button();Button restore;readonly DataGridView raw=new DataGridView();
         readonly object logLock=new object();readonly List<string> logLines=new List<string>();
         Snapshot snapshot;MemoryDevice memory;bool demo,loading,busy,unsaved,verified,closing;int activePage;
         string dataRoot=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"data");
@@ -62,9 +62,9 @@ namespace Zg1Control {
             Panel body=new Panel{Dock=DockStyle.Fill};Controls.Add(body);body.BringToFront();
             Panel sidebar=new Panel{Dock=DockStyle.Left,Width=174,Padding=new Padding(13,22,13,15),BackColor=Color.FromArgb(231,238,234)};body.Controls.Add(sidebar);
             content.Dock=DockStyle.Fill;content.Padding=new Padding(25,20,25,20);body.Controls.Add(content);content.BringToFront();
-            string[] names={"总览与增益","播放 EQ","麦克风 EQ","动态处理","备份与导入","寄存器与日志"};
+            string[] names={"总览与增益","播放 EQ","麦克风 EQ","动态处理","备份与还原","寄存器与日志"};
             for(int i=0;i<names.Length;i++){int ix=i;Button b=new Button{Text=names[i],Bounds=new Rectangle(13,22+i*53,148,43),TextAlign=ContentAlignment.MiddleLeft,Padding=new Padding(12,0,0,0)};StyleButton(b,false);b.Click+=delegate{ShowPage(ix);};sidebar.Controls.Add(b);nav.Add(b);Panel page=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(25,20,25,20),BackColor=Bg,Visible=false};content.Controls.Add(page);pages.Add(page);}
-            Label version=new Label{Text="便携版 1.0\n31C2 : 1102\n本地直连 · 无需联网",ForeColor=Muted,AutoSize=true,Location=new Point(24,body.Height-105),Anchor=AnchorStyles.Left|AnchorStyles.Bottom};sidebar.Controls.Add(version);
+            Label version=new Label{Text="便携版 1.1\n31C2 : 1102\n本地直连 · 无需联网",ForeColor=Muted,AutoSize=true,Location=new Point(24,body.Height-105),Anchor=AnchorStyles.Left|AnchorStyles.Bottom};sidebar.Controls.Add(version);
             body.PerformLayout();content.PerformLayout();foreach(Panel page in pages)page.Size=new Size(content.ClientSize.Width-50,content.ClientSize.Height-40);
             BuildOverview();BuildEq(1,"dac");BuildEq(2,"adc");BuildDynamics();BuildBackup();BuildRaw();ShowPage(0);
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(busy){e.Cancel=true;return;}if(!closing && !ConfirmDiscard())e.Cancel=true;};
@@ -104,12 +104,14 @@ namespace Zg1Control {
             Panel lim=Card(p,"限幅器","限制超过阈值的峰值。",494,309);y=86;foreach(Field f in fields.Where(f=>f.Group=="lim")){Row(lim,f.Key,y);y+=41;}
         }
         Button ActionButton(Control p,string text,int x,int y,int width,Action action){Button b=new Button{Text=text,Bounds=new Rectangle(x,y,width,38)};StyleButton(b,false);b.Click+=delegate{if(!busy)action();};p.Controls.Add(b);return b;}
-        void BuildBackup(){Panel p=pages[4];Heading(p,"备份与导入","导入只填入编辑区，仍需点击“应用修改”；不会打开文件后立即写入耳机。");
-            Panel c=Card(p,"配置文件","JSON 保存当前已读取的参数、设备标识与版本。只适用于同一型号和固件。",88,200);
-            ActionButton(c,"导出当前设备配置",22,106,190,Export);ActionButton(c,"导入配置到编辑区",228,106,190,Import);ActionButton(c,"打开备份文件夹",434,106,178,OpenData);
-            Panel help=Card(p,"自动备份与操作记录","每次应用或保存之前，先将当时的设备参数写入 data 文件夹。",304,195);
-            LabelAt(help,"应用：即时生效，并回读核对；未改动的参数不会重写。\n保存：把已经应用的当前配置提交到耳机，可能短暂断开 USB。\n导出文件覆盖工具已知的音频参数，不是固件备份。",23,91,790,88,10,false);
-            Panel sources=Card(p,"开源来源","参数：gxcreator / ktmicro-tools    ·    保存：jeromeof / devicePEQ",515,122);LabelAt(sources,"原项目许可证、协议说明和本工具源代码随压缩包附带。",23,83,790,27,9,false);
+        void BuildBackup(){Panel p=pages[4];Heading(p,"备份与还原","一键还原只撤销全局数字增益；自定义 EQ 保留。导入文件只填入编辑区。");
+            Panel rollback=Card(p,"一键还原增益 · 保留 EQ","恢复到已验证样机修改前的 0 dB，自动备份、保存并回读。不是完整出厂重置。",88,183);
+            restore=ActionButton(rollback,"一键还原增益并保存",22,100,225,async delegate{await RestoreGain();});
+            LabelAt(rollback,"恢复后音量会增大，请先暂停播放、摘下耳机。\n完成后关闭工具并拔插，再测试官方 App。",267,99,510,62,9,false);
+            Panel c=Card(p,"配置文件","JSON 保存当前已读取的参数。导入后仍需点击“应用修改”。",287,161);
+            ActionButton(c,"导出当前设备配置",22,101,190,Export);ActionButton(c,"导入配置到编辑区",228,101,190,Import);ActionButton(c,"打开备份文件夹",434,101,178,OpenData);
+            Panel help=Card(p,"自动备份与操作记录","应用、保存、还原前先备份；备份失败就停止。备份位于 EXE 同目录 data 文件夹。",464,167);
+            LabelAt(help,"还原只将全局数字增益改为 0 dB，其他参数和保留位保持当前值。\n若还修改过其他参数，请从自己的备份导入。官方 App 连接恢复尚待实机确认。\n参数快照不是完整固件备份。开源来源与许可随压缩包附带。",23,85,790,77,9,false);
         }
         void BuildRaw(){Panel p=pages[5];Heading(p,"寄存器与操作日志","用于核对与排查。此页不提供任意寄存器写入，不修改设备标识。");
             raw.SetBounds(0,88,850,253);raw.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;raw.ReadOnly=true;raw.AllowUserToAddRows=false;raw.AllowUserToDeleteRows=false;raw.RowHeadersVisible=false;raw.BackgroundColor=Color.White;raw.BorderStyle=BorderStyle.None;raw.AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill;raw.Columns.Add("address","地址");raw.Columns.Add("raw","原始值");raw.Columns.Add("meaning","用途");p.Controls.Add(raw);
@@ -126,7 +128,7 @@ namespace Zg1Control {
                 identity.Text=(demo?"演示 · ":"")+"ZG1 Ultra    ·    "+snapshot.Firmware+"    ·    "+snapshot.DeviceId;raw.Rows.Clear();foreach(var p in snapshot.Registers.OrderBy(x=>Convert.ToInt32(x.Key,16))){int address=Convert.ToInt32(p.Key,16);string meaning=string.Join(" / ",fields.Where(f=>f.Address==address).Select(f=>f.Label).Distinct().ToArray());raw.Rows.Add("0x"+p.Key,"0x"+p.Value.ToString("X8"),meaning.Length==0?"设备信息":meaning);}}
             loading=false;Changed();}
         void Changed(){if(snapshot!=null){decimal db=staged["dac.digital"];gainDisplay.Text=db.ToString("0.0",CultureInfo.InvariantCulture)+" dB";foreach(EqGraph graph in graphs){graph.State=snapshot;graph.Values=staged;graph.Invalidate();}}UpdateState();}
-        void UpdateState(){bool ready=snapshot!=null&&!busy;foreach(var p in editors)p.Value.Enabled=ready&&verified;connect.Enabled=!busy;apply.Enabled=ready&&verified&&HasChanges();save.Enabled=ready&&verified&&!HasChanges();pending.Text=busy?"正在操作设备，请稍候…":snapshot==null?"连接后加载参数":HasChanges()?"有待应用的修改 · 尚未写入耳机":unsaved?"已应用并核对 · 尚未保存到耳机":demo?"演示数据 · 不影响真实耳机":"设备参数已读取 · 编辑不会自动生效";connect.Text=busy?"操作中…":"连接并读取";}
+        void UpdateState(){bool ready=snapshot!=null&&!busy;foreach(var p in editors)p.Value.Enabled=ready&&verified;connect.Enabled=!busy;apply.Enabled=ready&&verified&&HasChanges();save.Enabled=ready&&verified&&!HasChanges();if(restore!=null)restore.Enabled=ready&&verified;pending.Text=busy?"正在操作设备，请稍候…":snapshot==null?"连接后加载参数":HasChanges()?"有待应用的修改 · 尚未写入耳机":unsaved?"已应用并核对 · 尚未保存到耳机":demo?"演示数据 · 不影响真实耳机":"设备参数已读取 · 编辑不会自动生效";connect.Text=busy?"操作中…":"连接并读取";}
         void Log(string line){lock(logLock){logLines.Add(DateTime.Now.ToString("HH:mm:ss.fff")+"  "+line);} }
         void FlushLog(){lock(logLock)logs.Lines=logLines.ToArray();logs.SelectionStart=logs.TextLength;logs.ScrollToCaret();}
         IDevice Open(){return demo?(IDevice)memory:new NativeDevice(Log);}
@@ -139,8 +141,13 @@ namespace Zg1Control {
                 using(Form dialog=new Form{Text=demo?"演示：应用修改":"应用以下修改",Size=new Size(650,480),StartPosition=FormStartPosition.CenterParent,MinimizeBox=false,MaximizeBox=false,Font=Font}){TextBox preview=new TextBox{Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill,Text=details,BackColor=Color.White,Font=new Font(Font.FontFamily,10)};dialog.Controls.Add(preview);FlowLayoutPanel buttons=new FlowLayoutPanel{Dock=DockStyle.Bottom,Height=58,FlowDirection=FlowDirection.RightToLeft,Padding=new Padding(10)};Button ok=new Button{Text="应用并回读",DialogResult=DialogResult.OK,Size=new Size(140,34)},cancel=new Button{Text="返回编辑",DialogResult=DialogResult.Cancel,Size=new Size(110,34)};StyleButton(ok,true);StyleButton(cancel,false);buttons.Controls.Add(ok);buttons.Controls.Add(cancel);dialog.Controls.Add(buttons);dialog.AcceptButton=ok;dialog.CancelButton=cancel;if(dialog.ShowDialog(this)!=DialogResult.OK)return;}
                 Snapshot baseline=snapshot;await Run("正在备份、应用并回读核对…",delegate{using(IDevice d=Open())return DeviceOps.Apply(d,baseline,plan,Backup,Log);},delegate(Snapshot result){snapshot=result;unsaved=true;LoadControls();status.Text="已应用 "+plan.Changes.Count+" 项修改，其他已知参数核对一致。需要断电保留时点击保存。";});
             }catch(Exception ex){Error(ex);}}
+        Snapshot ReadAfterSave(Snapshot expected){if(demo)return DeviceOps.Read(memory);System.Threading.Thread.Sleep(1600);Exception last=null;for(int i=0;i<3;i++){try{using(IDevice d=new NativeDevice(Log)){Snapshot after=DeviceOps.Read(d);if(after.Firmware!=expected.Firmware || after.Flags!=expected.Flags)throw new IOException("保存后设备版本或模式改变，请重新读取。");foreach(int a in Parameters.ConfigAddresses)if(after.Get(a)!=expected.Get(a))throw new IOException("保存后参数改变，请重新读取。");return after;}}catch(Exception ex){last=ex;System.Threading.Thread.Sleep(700);}}throw new IOException("保存指令已发送，但未能重新读取。请勿重复点击保存或还原；拔插后重新读取核对。",last);}
         async Task SaveDevice(){if(snapshot==null || HasChanges())return;Snapshot expected=snapshot;
-            await Run("正在提交当前配置，设备可能短暂重新连接…",delegate{using(IDevice d=Open())DeviceOps.Commit(d,expected,Backup);if(demo)return DeviceOps.Read(memory);System.Threading.Thread.Sleep(1600);Exception last=null;for(int i=0;i<3;i++){try{using(IDevice d=new NativeDevice(Log)){Snapshot after=DeviceOps.Read(d);foreach(int a in Parameters.ConfigAddresses)if(after.Get(a)!=expected.Get(a))throw new IOException("保存后参数改变，请重新读取。");return after;}}catch(Exception ex){last=ex;System.Threading.Thread.Sleep(700);}}throw new IOException("保存指令已发送，但未能重新读取。请勿重复点击保存；拔插后重新读取核对。",last);},delegate(Snapshot s){snapshot=s;unsaved=false;LoadControls();status.Text="保存指令已发送，重新读取一致。拔插一次可验证断电保留。";});}
+            await Run("正在提交当前配置，设备可能短暂重新连接…",delegate{using(IDevice d=Open())DeviceOps.Commit(d,expected,Backup);return ReadAfterSave(expected);},delegate(Snapshot s){snapshot=s;unsaved=false;LoadControls();status.Text="保存指令已发送，重新读取一致。拔插一次可验证断电保留。";});}
+        async Task RestoreGain(){if(snapshot==null || !verified || busy)return;
+            string message="将全局数字增益从 "+Parameters.Display(F("dac.digital"),F("dac.digital").Value(snapshot))+" 恢复为 0 dB，并保存到耳机。\r\n\r\n请先暂停播放、摘下耳机，恢复后音量可能明显增大。\r\n自定义 EQ、模拟增益、麦克风和动态处理均保留当前值。\r\n编辑区尚未应用的修改会丢弃；这不是完整出厂重置。\r\n\r\n完成后关闭工具、拔插耳机，再测试官方 App；连接问题不保证因此解决。\r\n是否继续？";
+            if(MessageBox.Show(this,message,demo?"演示：还原增益并保存":"还原增益并保存",MessageBoxButtons.OKCancel,MessageBoxIcon.Information,MessageBoxDefaultButton.Button2)!=DialogResult.OK)return;
+            Snapshot expected=snapshot;await Run("正在备份、还原增益并保存…",delegate{Snapshot after;using(IDevice d=Open())after=DeviceOps.RestoreGain(d,expected,Backup,Log);return ReadAfterSave(after);},delegate(Snapshot s){snapshot=s;unsaved=false;LoadControls();status.Text=demo?"演示还原完成；没有操作真实耳机。":"已还原为 0 dB 并保存，其他已知参数一致。关闭工具、拔插后测试官方 App。";});}
         void Export(){if(snapshot==null){MessageBox.Show(this,"请先连接并读取设备。","导出配置");return;}try{using(SaveFileDialog d=new SaveFileDialog{Filter="ZG1 配置|*.json",FileName="ZG1-"+DateTime.Now.ToString("yyyyMMdd-HHmm")+".json"})if(d.ShowDialog(this)==DialogResult.OK){Json.Save(d.FileName,snapshot);status.Text="已导出当前设备配置。未应用的编辑不包含在此文件。";}}catch(Exception ex){Error(ex);}}
         void Import(){if(snapshot==null){MessageBox.Show(this,"请先连接并读取设备，再导入配置。","导入配置");return;}try{using(OpenFileDialog d=new OpenFileDialog{Filter="ZG1 配置|*.json"})if(d.ShowDialog(this)==DialogResult.OK){FileInfo file=new FileInfo(d.FileName);if(file.Length>1024*1024)throw new InvalidDataException("配置文件过大。");Snapshot incoming=Json.Read(File.ReadAllText(d.FileName));if(incoming==null || incoming.Format!="zg1-control/v1" || incoming.DeviceId!=snapshot.DeviceId || incoming.Firmware!=snapshot.Firmware || incoming.Flags!=snapshot.Flags)throw new InvalidDataException("配置格式、型号、固件或控制模式不匹配。");Dictionary<string,decimal> proposed=new Dictionary<string,decimal>();foreach(Field f in fields)proposed[f.Key]=f.Value(incoming);Parameters.Build(snapshot,proposed);loading=true;try{foreach(Field f in fields){decimal value=proposed[f.Key];if(value<f.Min || value>f.Max)throw new InvalidDataException("配置参数超出范围。");NumericUpDown n=editors[f.Key] as NumericUpDown;if(n!=null)n.Value=value;else ((ComboBox)editors[f.Key]).SelectedIndex=(int)value;staged[f.Key]=value;}}finally{loading=false;}Changed();status.Text="配置已载入编辑区，尚未写入耳机。";}}catch(Exception ex){Error(ex);}}
         void Error(Exception ex){status.Text="已停止："+ex.Message;MessageBox.Show(this,ex.Message,"操作未完成",MessageBoxButtons.OK,MessageBoxIcon.Information);}

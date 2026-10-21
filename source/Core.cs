@@ -151,6 +151,14 @@ namespace Zg1Control {
         public void Dispose(){}
     }
     public static class DeviceOps {
+        // Verified pre-adjustment gain: 0 dB. Roll back this field only;
+        // never guess a factory-reset command or overwrite custom EQ.
+        public static Snapshot RestoreGain(IDevice d,Snapshot expected,Action<Snapshot> backup,Action<string> log) {
+            Plan plan=Parameters.Build(expected,new Dictionary<string,decimal>{{"dac.digital",0m}});
+            Snapshot after=Apply(d,expected,plan,backup,log);
+            Commit(d,after,backup);
+            return after;
+        }
         public static Snapshot Read(IDevice d) {
             if(d.Read(0xE1)!=0x12345678 || d.Read(0x5B)!=0x110231C2)throw new InvalidOperationException("设备协议或标识不匹配，已停止。");
             Snapshot s=new Snapshot{CapturedAt=DateTimeOffset.Now.ToString("o")};
